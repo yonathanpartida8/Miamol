@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Santuario Digital Elite</title>
+    <style>
+        :root {
+            --accent: #00f2ff;
+            --bg: #050505;
+        }
+
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background: var(--bg);
+            touch-action: none; font-family: 'Segoe UI', Roboto, sans-serif;
+        }
+
+        canvas {
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Capa de efectos para el modo Slime/Líquido */
+        #fx-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 2;
+            transition: backdrop-filter 0.5s ease;
+        }
+
+        /* Botón Home */
+        .home-btn {
+            position: absolute; top: 20px; left: 20px;
+            width: 45px; height: 45px; border-radius: 12px;
+            background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);
+            color: white; display: flex; align-items: center; justify-content: center;
+            text-decoration: none; z-index: 100; backdrop-filter: blur(10px);
+            font-size: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+
+        /* Menú de Modos mejorado */
+        #menu {
+            position: absolute; bottom: 25px; left: 50%;
+            transform: translateX(-50%);
+            display: flex; gap: 8px; z-index: 100;
+            width: 95%; max-width: 500px;
+            background: rgba(255,255,255,0.05);
+            padding: 8px; border-radius: 20px;
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .mode-btn {
+            flex: 1; padding: 12px 2px; border-radius: 15px;
+            border: none; background: transparent;
+            color: rgba(255,255,255,0.5); font-size: 10px;
+            font-weight: bold; text-transform: uppercase;
+            letter-spacing: 1px; transition: all 0.3s ease;
+            cursor: pointer; -webkit-tap-highlight-color: transparent;
+        }
+
+        .mode-btn.active {
+            background: var(--accent);
+            color: #000;
+            box-shadow: 0 0 20px rgba(0, 242, 255, 0.4);
+        }
+    </style>
+</head>
+<body>
+
+    <a href="home.html" class="home-btn">🏠</a>
+
+    <div id="fx-overlay"></div>
+
+    <div id="menu">
+        <button class="mode-btn active" onclick="setAppMode('galaxy', this)">Galaxia</button>
+        <button class="mode-btn" onclick="setAppMode('vortex', this)">Espirales</button>
+        <button class="mode-btn" onclick="setAppMode('liquid', this)">Líquido</button>
+        <button class="mode-btn" onclick="setAppMode('shatter', this)">Cristal</button>
+    </div>
+
+    <canvas id="mainCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('mainCanvas');
+        const ctx = canvas.getContext('2d');
+        const fx = document.getElementById('fx-overlay');
+        
+        let width, height;
+        let particles = [];
+        let currentMode = 'galaxy';
+        let isTouching = false;
+        let lastX = 0, lastY = 0;
+
+        // Colores Neón Premium
+        const palette = ['#00f2ff', '#7000ff', '#ff0055', '#00ff9f', '#ffff00'];
+
+        // --- AUDIO ---
+        const AudioKit = {
+            ctx: null,
+            play(freq, type = 'sine') {
+                if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                if (this.ctx.state === 'suspended') this.ctx.resume();
+                const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+                o.type = type;
+                o.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                o.frequency.exponentialRampToValueAtTime(1, this.ctx.currentTime + 0.3);
+                g.gain.setValueAtTime(0.1, this.ctx.currentTime);
+                g.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.3);
+                o.connect(g); g.connect(this.ctx.destination);
+                o.start(); o.stop(this.ctx.currentTime + 0.3);
+            }
+        };
+
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x; this.y = y;
+                this.color = color;
+                this.size = currentMode === 'liquid' ? 25 : Math.random() * 4 + 1;
+                this.vx = (Math.random() - 0.5) * 10;
+                this.vy = (Math.random() - 0.5) * 10;
+                this.life = 1.0;
+                this.decay = 0.01 + Math.random() * 0.01;
+            }
+
+            update() {
+                if (currentMode === 'vortex' && isTouching) {
+                    const dx = lastX - this.x;
+                    const dy = lastY - this.y;
+                    const d = Math.sqrt(dx*dx + dy*dy);
+                    this.vx += (dx / d) * 1.5;
+                    this.vy += (dy / d) * 1.5;
+                    // Rotación centrípeta
+                    this.vx += (dy / d) * 2.5;
+                    this.vy -= (dx / d) * 2.5;
+                }
+
+                if (currentMode === 'shatter') this.vy += 0.3; // Gravedad
+
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vx *= 0.95;
+                this.vy *= 0.95;
+                this.life -= this.decay;
+            }
+
+            draw() {
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function setAppMode(m, btn) {
+            currentMode = m;
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            particles = []; // Limpiar para cambiar fluido
+            
+            // Corrección de errores visuales
+            if (m === 'liquid') {
+                fx.style.backdropFilter = "blur(12px) contrast(20)";
+            } else {
+                fx.style.backdropFilter = "none";
+            }
+        }
+
+        function spawn(x, y) {
+            lastX = x; lastY = y;
+            const color = palette[Math.floor(Math.random() * palette.length)];
+            const amount = currentMode === 'shatter' ? 15 : 4;
+            
+            for(let i=0; i<amount; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+
+            // Audio basado en posición Y
+            const freq = 100 + (1 - y/height) * 800;
+            AudioKit.play(freq, currentMode === 'shatter' ? 'triangle' : 'sine');
+            if (navigator.vibrate) navigator.vibrate(2);
+        }
+
+        // --- GESTIÓN DE EVENTOS SIN ERRORES ---
+        const handleDown = (e) => {
+            isTouching = true;
+            const pos = e.touches ? e.touches[0] : e;
+            spawn(pos.clientX, pos.clientY);
+        };
+
+        const handleMove = (e) => {
+            if (!isTouching) return;
+            const pos = e.touches ? e.touches[0] : e;
+            spawn(pos.clientX, pos.clientY);
+            if(e.touches) e.preventDefault(); // Evita scroll
+        };
+
+        canvas.addEventListener('mousedown', handleDown);
+        window.addEventListener('mousemove', handleMove);
+        window.addEventListener('mouseup', () => isTouching = false);
+
+        canvas.addEventListener('touchstart', handleDown, {passive: false});
+        canvas.addEventListener('touchmove', handleMove, {passive: false});
+        canvas.addEventListener('touchend', () => isTouching = false);
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+
+        function animate() {
+            // Fondo con rastro
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = 'rgba(5, 5, 5, 0.2)';
+            ctx.fillRect(0, 0, width, height);
+
+            for (let i = particles.length - 1; i >= 0; i--) {
+                particles[i].update();
+                particles[i].draw();
+                if (particles[i].life <= 0) particles.splice(i, 1);
+            }
+            requestAnimationFrame(animate);
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+        animate();
+    </script>
+</body>
+</html>
